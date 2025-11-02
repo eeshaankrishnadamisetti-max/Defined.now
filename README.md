@@ -1,4 +1,4 @@
-# 🛡️ Multi-Sensor AI Drone Detection System for Border Surveillance
+# 🛡️Sentinel - Multi-Sensor AI Drone Detection System for Border Surveillance
 
 ### Team: Eeshaan Krishna D. · Y. Aditya Reddy · M. Rithwik · P. Vihaan  
 **Project Type:** Proof of Concept (PoC)  
