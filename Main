@@ -1,0 +1,103 @@
+import cv2
+import time
+import threading
+import spidev
+from ultralytics import YOLO
+
+# --- YOLOv8 Setup ---
+model = YOLO("best.pt")  # Your custom trained drone model
+
+# --- RF Transceiver Setup (nRF24L01 simulated) ---
+class RFReceiver:
+    def __init__(self, channel=76):
+        self.spi = spidev.SpiDev()
+        self.channel = channel
+        try:
+            self.spi.open(0, 0)  # SPI bus 0, device 0
+            self.spi.max_speed_hz = 4000000
+            print("[INFO] RF module initialized.")
+        except FileNotFoundError:
+            print("[WARN] No SPI device found. Running in simulation mode.")
+
+    def read_signal_strength(self):
+        """Read or simulate RF signal strength (RSSI-like)."""
+        try:
+            # Example SPI transaction (this depends on your NRF24 library)
+            raw_data = self.spi.xfer2([0x00])
+            return sum(raw_data) / 255.0  # crude normalization
+        except Exception:
+            # Simulate random RF noise
+            import random
+            return random.uniform(0.0, 1.0)
+
+    def close(self):
+        self.spi.close()
+
+
+# --- Drone Fusion Detector ---
+class DroneFusion:
+    def __init__(self, rf_receiver, model):
+        self.rf = rf_receiver
+        self.model = model
+        self.video_running = True
+        self.drone_detected = False
+
+    def video_detection(self):
+        """Run YOLOv8 detection loop."""
+        cap = cv2.VideoCapture(0)
+        if not cap.isOpened():
+            print("[ERROR] Camera not found.")
+            return
+
+        while self.video_running:
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            results = self.model.predict(frame, conf=0.5, verbose=False)
+            for r in results:
+                for box in r.boxes:
+                    cls = int(box.cls[0])
+                    label = self.model.names[cls]
+                    if "drone" in label.lower():
+                        self.drone_detected = True
+                        cv2.putText(frame, "DRONE DETECTED!", (20, 50),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
+
+            cv2.imshow("Drone Detection", frame)
+            if cv2.waitKey(1) & 0xFF == ord("q"):
+                break
+
+        cap.release()
+        cv2.destroyAllWindows()
+
+    def rf_monitor(self):
+        """Check RF energy levels periodically."""
+        while self.video_running:
+            rf_signal = self.rf.read_signal_strength()
+            if rf_signal > 0.8:  # adjust threshold as needed
+                print(f"[ALERT] High RF activity detected ({rf_signal:.2f})")
+                self.drone_detected = True
+            time.sleep(0.5)
+
+    def start(self):
+        """Run both detection threads together."""
+        t1 = threading.Thread(target=self.video_detection)
+        t2 = threading.Thread(target=self.rf_monitor)
+        t1.start()
+        t2.start()
+
+        try:
+            while t1.is_alive():
+                time.sleep(1)
+        except KeyboardInterrupt:
+            print("\n[INFO] Stopping system...")
+            self.video_running = False
+
+        self.rf.close()
+
+
+if __name__ == "__main__":
+    rf_receiver = RFReceiver()
+    fusion = DroneFusion(rf_receiver, model)
+    fusion.start()
